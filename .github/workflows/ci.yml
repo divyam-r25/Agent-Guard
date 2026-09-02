@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  # ─── Type Check & Build: API ───
+  api-build:
+    name: API — TypeScript Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: cd ../.. && npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+  # ─── Type Check & Build: Web ───
+  web-build:
+    name: Web — TypeScript Check & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: cd ../.. && npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Vite build
+        env:
+          NODE_ENV: production
+        run: npx vite build
+
+  # ─── Lint fixtures JSON ───
+  fixtures-validate:
+    name: Validate JSON Fixtures
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate fixtures JSON
+        run: |
+          for f in fixtures/*.json; do
+            echo "Validating $f ..."
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" && echo "$f OK"
+          done

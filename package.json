@@ -1,0 +1,22 @@
+{
+  "name": "agentguard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AgentGuard — Agentic Transaction Trust Layer for Razorpay",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build": "npm --prefix apps/api run build && npm --prefix apps/web run build",
+    "build:api": "npm --prefix apps/api run build",
+    "build:web": "npm --prefix apps/web run build",
+    "start": "npm --prefix apps/api run start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global Base Styles ─── */
+@layer base {
+  * {
+    @apply border-surface-700;
+  }
+  body {
+    @apply bg-surface-950 text-gray-100 font-sans;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(30, 113, 241, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-700 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-600 rounded-full;
+  }
+}
+
+/* ─── Glass Panels ─── */
+@layer components {
+  .glass-panel {
+    @apply bg-surface-900/60 backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.03),
+      0 4px 24px rgba(0,0,0,0.3),
+      inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .glass-panel-sm {
+    @apply bg-surface-800/50 backdrop-blur-md border border-white/[0.05] rounded-xl;
+  }
+
+  /* ─── Decision Cards ─── */
+  .decision-allow {
+    @apply border-allow-500/30 bg-allow-500/5;
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.1), inset 0 1px 0 rgba(16, 185, 129, 0.08);
+  }
+  .decision-stepup {
+    @apply border-stepup-500/30 bg-stepup-500/5;
+    box-shadow: 0 0 30px rgba(245, 158, 11, 0.1), inset 0 1px 0 rgba(245, 158, 11, 0.08);
+  }
+  .decision-block {
+    @apply border-block-500/30 bg-block-500/5;
+    box-shadow: 0 0 30px rgba(239, 68, 68, 0.1), inset 0 1px 0 rgba(239, 68, 68, 0.08);
+  }
+
+  /* ─── Buttons ─── */
+  .btn-primary {
+    @apply px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold rounded-xl
+           transition-all duration-200 shadow-lg shadow-brand-600/20 hover:shadow-brand-500/30
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-scenario {
+    @apply px-4 py-2.5 bg-surface-800/80 hover:bg-surface-700/80 border border-white/[0.06]
+           text-sm font-medium rounded-xl transition-all duration-200
+           hover:border-white/[0.12] active:scale-[0.97] disabled:opacity-40;
+  }
+  .btn-danger {
+    @apply px-4 py-2.5 bg-block-600/20 hover:bg-block-600/30 border border-block-500/20
+           text-block-400 text-sm font-semibold rounded-xl transition-all duration-200
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-success {
+    @apply px-4 py-2.5 bg-allow-600/20 hover:bg-allow-600/30 border border-allow-500/20
+           text-allow-400 text-sm font-semibold rounded-xl transition-all duration-200
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* ─── Badges ─── */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase;
+  }
+  .badge-allow  { @apply badge bg-allow-500/15 text-allow-400 border border-allow-500/20; }
+  .badge-stepup { @apply badge bg-stepup-500/15 text-stepup-400 border border-stepup-500/20; }
+  .badge-block  { @apply badge bg-block-500/15 text-block-400 border border-block-500/20; }
+  .badge-info   { @apply badge bg-brand-500/15 text-brand-400 border border-brand-500/20; }
+
+  /* ─── Timeline Dots ─── */
+  .timeline-dot         { @apply w-3 h-3 rounded-full border-2 flex-shrink-0; }
+  .timeline-dot-active  { @apply timeline-dot border-brand-400 bg-brand-400 shadow-lg shadow-brand-400/50; }
+  .timeline-dot-complete{ @apply timeline-dot border-allow-500 bg-allow-500; }
+  .timeline-dot-danger  { @apply timeline-dot border-block-500 bg-block-500 shadow-lg shadow-block-500/50; }
+  .timeline-dot-warning { @apply timeline-dot border-stepup-500 bg-stepup-500; }
+  .timeline-dot-idle    { @apply timeline-dot border-surface-600 bg-surface-800; }
+
+  /* ─── Risk Meter ─── */
+  .risk-meter-track { @apply h-2.5 rounded-full bg-surface-800 overflow-hidden relative; }
+  .risk-meter-fill  { @apply h-full rounded-full transition-all duration-1000 ease-out; }
+}
+
+/* ─── Custom Animations ─── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+.animate-float { animation: float 3s ease-in-out infinite; }
+
+/* ─── Shimmer Effect ─── */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ─── Pulse Ring ─── */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  70%  { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.animate-pulse-ring { animation: pulse-ring 2s infinite; }

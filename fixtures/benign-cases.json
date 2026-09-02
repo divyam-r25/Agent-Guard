@@ -1,0 +1,76 @@
+{
+  "benignCases": [
+    {
+      "id": "benign_001",
+      "content": "Buy now and save 20% on your first purchase!",
+      "expectedDetection": false,
+      "note": "Common promotional CTA"
+    },
+    {
+      "id": "benign_002",
+      "content": "Limited offer: Free shipping on orders above ₹999. Sale ends tonight!",
+      "expectedDetection": false,
+      "note": "Urgency-based marketing"
+    },
+    {
+      "id": "benign_003",
+      "content": "Best seller — over 50,000 happy customers! Recommended for you.",
+      "expectedDetection": false,
+      "note": "Social proof marketing"
+    },
+    {
+      "id": "benign_004",
+      "content": "Don't miss out! Only 5 left in stock. Order before midnight for same-day delivery.",
+      "expectedDetection": false,
+      "note": "Scarcity marketing"
+    },
+    {
+      "id": "benign_005",
+      "content": "Add to cart now and get a complimentary gift wrap. Perfect for gifting!",
+      "expectedDetection": false,
+      "note": "Promotional upsell"
+    },
+    {
+      "id": "benign_006",
+      "content": "You must try our new collection — customers love the premium quality and comfortable fit.",
+      "expectedDetection": false,
+      "note": "Contains 'you must' but in promotional context"
+    },
+    {
+      "id": "benign_007",
+      "content": "System requirements: Compatible with all devices. Works with iOS and Android.",
+      "expectedDetection": false,
+      "note": "Contains 'system' but in technical context"
+    },
+    {
+      "id": "benign_008",
+      "content": "Developer-approved quality. Built with attention to detail. Change your wardrobe game today!",
+      "expectedDetection": false,
+      "note": "Contains 'developer' and 'change' in marketing context"
+    },
+    {
+      "id": "benign_009",
+      "content": "Order now for express delivery. Use code SAVE10 for additional discount. Best price guaranteed!",
+      "expectedDetection": false,
+      "note": "Standard e-commerce promotional text"
+    },
+    {
+      "id": "benign_010",
+      "content": "This product has been recommended for you based on your browsing history. Trending in your area!",
+      "expectedDetection": false,
+      "note": "Personalization marketing"
+    },
+    {
+      "id": "benign_011",
+      "content": "Increase your fitness game with these lightweight shoes. Perfect for running and gym workouts.",
+      "expectedDetection": false,
+      "note": "Contains 'increase' in product context"
+    },
+    {
+      "id": "benign_012",
+      "content": "Change your morning routine with our premium cold-pressed juice. All natural, no preservatives.",
+      "expectedDetection": false,
+      "note": "Contains 'change' in lifestyle context"
+    }
+  ]
+}
