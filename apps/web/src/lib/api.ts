@@ -6,7 +6,7 @@
 //               trailing slash is stripped so URLs never become https://host//api/...
 //   development → '/api'  (proxied to http://localhost:8000 by vite.config.ts)
 const API_BASE = import.meta.env.VITE_API_URL
-  ? `${(import.meta.env.VITE_API_URL as string).replace(/\/$/, '')}/api`
+  ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api`
   : '/api';
 
 

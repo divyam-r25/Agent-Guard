@@ -40,10 +40,11 @@ const PORT = parseInt(process.env.PORT || '8000', 10);
 // Examples:
 //   single:   FRONTEND_URL=https://agentguard.vercel.app
 //   multiple: FRONTEND_URL=https://agentguard.vercel.app,https://agentguard-git-main-divyam.vercel.app
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
-  .split(',')
-  .map(v => v.trim())
-  .filter(Boolean);
+const defaultOrigins = ['http://localhost:5173', 'http://localhost:3000'];
+const envOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(v => v.trim()).filter(Boolean)
+  : [];
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
 app.use(cors({
   origin: (origin, callback) => {

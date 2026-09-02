@@ -228,26 +228,29 @@ AgentGuard is configured for multi-host deployment with separate frontend and ba
 - **Host**: Vercel
 - **Framework Preset**: Vite / React
 - **Root Directory**: `apps/web`
-- **Build Command**: `npm run build` (or default `vite build`)
+- **Build Command**: `npm run build`
 - **Output Directory**: `dist`
 - **Environment Variables**:
-  - `VITE_API_URL`: Base URL of the deployed backend service (e.g. `https://agentguard-api.onrender.com`)
+  - `VITE_API_URL`: Base URL of the deployed Render backend service (e.g., `https://agentguard-api.onrender.com`)
 
-> ⚠️ **Security Notice**: Only non-sensitive variables prefixed with `VITE_` (such as `VITE_API_URL`) may be exposed to the frontend. Never place Gemini API keys, Razorpay secret keys, or token signing secrets in Vercel environment variables.
+> ⚠️ **Security Notice**: Only non-sensitive variables prefixed with `VITE_` (such as `VITE_API_URL`) belong in frontend environment variables. Never place Gemini API keys, Razorpay secret keys (`RAZORPAY_KEY_SECRET`), or signing secrets in Vercel.
 
 ### Backend Deployment (Render Web Service)
 - **Host**: Render (Web Service)
 - **Environment**: Node
-- **Root Directory**: `apps/api` (or root with workspace build)
-- **Build Command**: `npm run build`
-- **Start Command**: `npm start`
+- **Root Directory**: `apps/api`
+- **Build Command**: `npm install && npm run build` (or root `npm run build:api`)
+- **Start Command**: `npm start` (or `node dist/index.js`)
 - **Environment Variables**:
-  - `PORT`: Provided automatically by Render
-  - `FRONTEND_URL`: URL of the deployed Vercel frontend (e.g. `https://agentguard.vercel.app`), or a comma-separated list of allowed origins for CORS.
+  - `PORT`: Provided automatically by Render (do not hardcode)
+  - `FRONTEND_URL`: URL of the deployed Vercel frontend (e.g. `https://agentguard.vercel.app`), or a comma-separated list of allowed origins
   - `LLM_API_KEY`: Google Gemini API key (optional; falls back to deterministic rules if absent)
+  - `LLM_PROVIDER`: LLM provider name (optional; default `gemini`)
+  - `LLM_MODEL`: Gemini model name (optional; default `gemini-2.0-flash`)
   - `RAZORPAY_KEY_ID`: Razorpay test-mode key ID (optional; uses mock provider if absent)
   - `RAZORPAY_KEY_SECRET`: Razorpay test-mode secret (optional; uses mock provider if absent)
-  - `USE_MOCK_PAYMENTS`: Set to `true` to force mock payments even with keys present.
+  - `USE_MOCK_LLM`: Set to `true` to force deterministic LLM behavior (optional; default `false`)
+  - `USE_MOCK_PAYMENTS`: Set to `true` to force mock payment provider (optional; default `true`)
 
 ---
 
