@@ -40,20 +40,49 @@ const PORT = parseInt(process.env.PORT || '8000', 10);
 // Examples:
 //   single:   FRONTEND_URL=https://agentguard.vercel.app
 //   multiple: FRONTEND_URL=https://agentguard.vercel.app,https://agentguard-git-main-divyam.vercel.app
-const defaultOrigins = ['http://localhost:5173', 'http://localhost:3000'];
-const envOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(v => v.trim()).filter(Boolean)
-  : [];
-const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
+// Task 1 — Normalize origins: trim whitespace, strip trailing slashes, drop empties
+const normalizeOrigin = (value: string): string =>
+  value.trim().replace(/\/+$/, '');
+
+const envOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL
+      .split(',')
+      .map(normalizeOrigin)
+      .filter(Boolean)
+  : [];
+
+const allowedOrigins = Array.from(
+  new Set([
+    'http://localhost:5173',
+    'http://localhost:3000',
+    ...envOrigins,
+  ])
+);
+
+// Task 3 — Safe temporary Vercel preview/deployment fallback (HTTPS only)
+const VERCEL_ORIGIN_RE = /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/;
+
+// Task 2 & 4 — CORS callback with proper preflight handling
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (curl, Render health checks, same-origin)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS origin not allowed'));
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no Origin header (curl, server-to-server, Render health checks)
+    if (!origin) {
+      return callback(null, true);
     }
+
+    // Explicit allowlist check
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Hackathon fallback: allow any HTTPS *.vercel.app origin
+    if (VERCEL_ORIGIN_RE.test(origin)) {
+      return callback(null, true);
+    }
+
+    // Reject everything else with a descriptive error
+    return callback(new Error(`CORS origin not allowed: ${origin}`));
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
@@ -261,6 +290,10 @@ app.listen(PORT, () => {
   ║                                              ║
   ╚══════════════════════════════════════════════╝
   `);
+
+  // Task 5 — CORS startup diagnostics (no secrets)
+  console.log(`[CORS] explicit origins: ${JSON.stringify(allowedOrigins)}`);
+  console.log(`[CORS] HTTPS *.vercel.app: enabled`);
 });
 
 export default app;
