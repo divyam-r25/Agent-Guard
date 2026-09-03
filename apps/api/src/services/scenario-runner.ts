@@ -1,6 +1,9 @@
 // ─── Demo Scenario Orchestrator ───
 // Runs deterministic demo scenarios from fixtures
 // Per PRD Section 18
+//
+// Pipeline: Intent → Context Firewall → Source-of-Truth → Policy Engine
+//           → Authorization Token → Payment Provider
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,6 +17,7 @@ import {
   FirewallResult,
   AgentState,
   PipelineResult,
+  SourceOfTruthResult,
 } from '../types';
 import { catalogSimulator } from './catalog-simulator';
 import { runContextFirewall } from './context-firewall';
@@ -22,6 +26,8 @@ import { evaluateTransaction, approveStepUp } from './policy-engine';
 import { paymentGateway } from './payment-provider';
 import { createShoppingAgent } from './shopping-agent';
 import { eventLogger } from './event-logger';
+import { verifyAgainstSourceOfTruth } from './source-of-truth';
+import { issueAuthToken, resetAuthTokenStore } from './auth-token';
 
 interface ScenarioFixture {
   id: string;
@@ -170,7 +176,10 @@ export async function runScenario(scenarioId: string): Promise<PipelineResult> {
     category: scenario.transaction.category,
   };
 
-  // 5. Agent state
+  // 5. Source-of-Truth verification (MANDATORY before policy decision)
+  const sourceOfTruthResult = await verifyAgainstSourceOfTruth(transaction, session.id);
+
+  // 6. Agent state
   const agentState: AgentState = {
     sessionId: session.id,
     status: 'awaiting_decision',
@@ -204,26 +213,41 @@ export async function runScenario(scenarioId: string): Promise<PipelineResult> {
     proposedTransaction: transaction,
   };
 
-  // 6. Policy Engine evaluation
+  // 7. Policy Engine evaluation (with source-of-truth result)
   const decision = evaluateTransaction(
     transaction,
     intentContract,
-    { sessionId: session.id, injectionDetectedInSession: injectionInSession }
+    {
+      sessionId: session.id,
+      injectionDetectedInSession: injectionInSession,
+      sourceOfTruthResult,
+    }
   );
   decisions.set(transaction.id, decision);
 
-  // 7. Payment (only if ALLOW)
+  // 8. Authorization token + Payment (only if ALLOW)
   if (decision.decision === 'ALLOW') {
-    const orderResult = await paymentGateway.createOrder({
-      amount: transaction.amount,
-      currency: transaction.currency,
-      receipt: `receipt_${transaction.id}`,
-      notes: {
-        intentId: intentContract.id,
-        sessionId: session.id,
-        productIds: transaction.productIds.join(','),
+    // Issue authorization token for the exact transaction
+    const authToken = issueAuthToken('ALLOW', transaction, intentContract);
+    decision.authToken = authToken;
+
+    // Payment with mandatory token verification
+    const orderResult = await paymentGateway.createOrder(
+      {
+        amount: transaction.amount,
+        currency: transaction.currency,
+        receipt: `receipt_${transaction.id}`,
+        notes: {
+          intentId: intentContract.id,
+          sessionId: session.id,
+          productIds: transaction.productIds.join(','),
+        },
       },
-    }, session.id);
+      session.id,
+      authToken.tokenId,
+      transaction,
+      intentContract
+    );
 
     if (orderResult.success) {
       decision.razorpayOrderId = orderResult.orderId;
@@ -231,13 +255,14 @@ export async function runScenario(scenarioId: string): Promise<PipelineResult> {
     }
   }
 
-  // 8. Build pipeline result
+  // 9. Build pipeline result
   const result: PipelineResult = {
     session,
     intentContract,
     firewallResults,
     agentState,
     decision,
+    sourceOfTruthResult,
     events: eventLogger.getEvents(session.id),
   };
 
@@ -285,25 +310,44 @@ export async function runFreeformRequest(userMessage: string): Promise<PipelineR
   // 4. Context Firewall
   const fwResult = await runContextFirewall(product, session.id);
 
-  // 5. Policy Engine
+  // 5. Source-of-Truth verification (MANDATORY before policy decision)
+  const sourceOfTruthResult = await verifyAgainstSourceOfTruth(
+    agentState.proposedTransaction,
+    session.id
+  );
+
+  // 6. Policy Engine (with source-of-truth result)
   const decision = evaluateTransaction(
     agentState.proposedTransaction,
     intentContract,
-    { sessionId: session.id, injectionDetectedInSession: fwResult.injectionDetected }
+    {
+      sessionId: session.id,
+      injectionDetectedInSession: fwResult.injectionDetected,
+      sourceOfTruthResult,
+    }
   );
   decisions.set(agentState.proposedTransaction.id, decision);
 
-  // 6. Payment if ALLOW
+  // 7. Authorization token + Payment if ALLOW
   if (decision.decision === 'ALLOW') {
-    const orderResult = await paymentGateway.createOrder({
-      amount: agentState.proposedTransaction.amount,
-      currency: agentState.proposedTransaction.currency,
-      receipt: `receipt_${agentState.proposedTransaction.id}`,
-      notes: {
-        intentId: intentContract.id,
-        sessionId: session.id,
+    const authToken = issueAuthToken('ALLOW', agentState.proposedTransaction, intentContract);
+    decision.authToken = authToken;
+
+    const orderResult = await paymentGateway.createOrder(
+      {
+        amount: agentState.proposedTransaction.amount,
+        currency: agentState.proposedTransaction.currency,
+        receipt: `receipt_${agentState.proposedTransaction.id}`,
+        notes: {
+          intentId: intentContract.id,
+          sessionId: session.id,
+        },
       },
-    }, session.id);
+      session.id,
+      authToken.tokenId,
+      agentState.proposedTransaction,
+      intentContract
+    );
 
     if (orderResult.success) {
       decision.razorpayOrderId = orderResult.orderId;
@@ -317,6 +361,7 @@ export async function runFreeformRequest(userMessage: string): Promise<PipelineR
     firewallResults: [fwResult],
     agentState,
     decision,
+    sourceOfTruthResult,
     events: eventLogger.getEvents(session.id),
   };
 
@@ -331,20 +376,35 @@ export async function handleStepUpApproval(transactionId: string, sessionId: str
 
   const approved = approveStepUp(originalDecision, sessionId);
 
-  // Now create payment
+  // Now create payment with authorization token
   const pipelineResult = pipelineResults.get(sessionId);
   if (pipelineResult?.agentState.proposedTransaction) {
     const txn = pipelineResult.agentState.proposedTransaction;
-    const orderResult = await paymentGateway.createOrder({
-      amount: txn.amount,
-      currency: txn.currency,
-      receipt: `receipt_${txn.id}`,
-      notes: {
-        intentId: originalDecision.intentId,
-        sessionId,
-        stepUpApproved: 'true',
+
+    // Retrieve the intent contract for token issuance
+    const intentContract = pipelineResult.intentContract;
+
+    // Issue ALLOW authorization token for the exact approved transaction
+    const authToken = issueAuthToken('ALLOW', txn, intentContract);
+    approved.authToken = authToken;
+
+    // Payment with mandatory token verification
+    const orderResult = await paymentGateway.createOrder(
+      {
+        amount: txn.amount,
+        currency: txn.currency,
+        receipt: `receipt_${txn.id}`,
+        notes: {
+          intentId: originalDecision.intentId,
+          sessionId,
+          stepUpApproved: 'true',
+        },
       },
-    }, sessionId);
+      sessionId,
+      authToken.tokenId,
+      txn,
+      intentContract
+    );
 
     if (orderResult.success) {
       approved.razorpayOrderId = orderResult.orderId;
@@ -367,6 +427,7 @@ export function resetAll(): void {
   pipelineResults.clear();
   eventLogger.reset();
   catalogSimulator.reset();
+  resetAuthTokenStore();
 }
 
 export function getAvailableScenarios() {

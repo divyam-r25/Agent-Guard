@@ -12,9 +12,31 @@ import {
   IntentContract,
   Decision,
 } from '../types';
+import { eventLogger } from './event-logger';
 
-// Token secret — never exposed to client
-const TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || 'agentguard-dev-secret-do-not-use-in-prod';
+// ─── Token Secret ───
+// In production (NODE_ENV=production), AUTH_TOKEN_SECRET MUST be set.
+// In development, a fallback secret is used for convenience.
+const DEV_FALLBACK_SECRET = 'agentguard-dev-secret-do-not-use-in-prod';
+
+function resolveTokenSecret(): string {
+  const secret = process.env.AUTH_TOKEN_SECRET;
+  if (secret) return secret;
+
+  if (process.env.NODE_ENV === 'production') {
+    console.error(
+      '[SECURITY] FATAL: AUTH_TOKEN_SECRET is not set in production. ' +
+      'Payment authorization tokens cannot be signed securely. ' +
+      'Set AUTH_TOKEN_SECRET in your environment variables.'
+    );
+    throw new Error('AUTH_TOKEN_SECRET is required in production');
+  }
+
+  // Development fallback — never used in production
+  return DEV_FALLBACK_SECRET;
+}
+
+const TOKEN_SECRET = resolveTokenSecret();
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Server-side token store
@@ -28,7 +50,8 @@ function buildPayload(token: Omit<AuthorizationToken, 'signature' | 'consumed'>)
     token.intentId,
     token.transactionId,
     token.merchantId,
-    token.productIds.sort().join(','),
+    // Non-mutating sort — never modify the original array
+    [...token.productIds].sort().join(','),
     token.amount.toString(),
     token.currency,
     token.quantity.toString(),
@@ -59,7 +82,7 @@ export function issueAuthToken(
     intentId: intent.id,
     transactionId: transaction.id,
     merchantId: transaction.merchantId,
-    productIds: transaction.productIds,
+    productIds: [...transaction.productIds], // defensive copy
     amount: transaction.amount,
     currency: transaction.currency,
     quantity: transaction.quantity,
@@ -80,38 +103,56 @@ export function issueAuthToken(
 
   authTokenStore.set(token.tokenId, token);
 
-  console.log(
-    JSON.stringify({
-      level: 'INFO',
-      type: 'auth_token_issued',
+  eventLogger.log({
+    sessionId: token.sessionId,
+    intentId: token.intentId,
+    transactionId: token.transactionId,
+    type: 'auth_token',
+    severity: 'info',
+    message: `Authorization token issued: ${token.tokenId} for transaction ${token.transactionId} (₹${token.amount} ${token.currency})`,
+    metadata: {
+      event: 'auth_token_issued',
       tokenId: token.tokenId,
       transactionId: token.transactionId,
       amount: token.amount,
+      currency: token.currency,
+      decision: token.decision,
       expiresAt: token.expiresAt,
-    })
-  );
+    },
+  });
 
   return token;
 }
 
 // ─── Verify Token ───
+// Full binding verification: every field must match the proposed transaction.
 export function verifyAuthToken(
   tokenId: string,
-  transaction: ProposedTransaction
+  transaction: ProposedTransaction,
+  intentId: string
 ): { valid: boolean; reason?: string; token?: AuthorizationToken } {
   const stored = authTokenStore.get(tokenId);
 
   if (!stored) {
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, 'Token not found');
     return { valid: false, reason: 'Token not found' };
   }
 
   if (stored.consumed) {
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, 'Token already consumed');
     return { valid: false, reason: 'Token already consumed' };
   }
 
   const now = new Date();
   if (now > new Date(stored.expiresAt)) {
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, 'Token expired');
     return { valid: false, reason: 'Token expired' };
+  }
+
+  // Decision must be ALLOW — only ALLOW tokens authorize payment
+  if (stored.decision !== 'ALLOW') {
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, `Token decision is ${stored.decision}, not ALLOW`);
+    return { valid: false, reason: `Token decision is ${stored.decision}, not ALLOW` };
   }
 
   // Verify HMAC signature
@@ -133,35 +174,70 @@ export function verifyAuthToken(
   const expectedSig = signPayload(payload);
 
   if (!crypto.timingSafeEqual(Buffer.from(stored.signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, 'Token signature invalid');
     return { valid: false, reason: 'Token signature invalid' };
   }
 
-  // Verify binding — must match exact transaction fields
+  // ─── Verify binding — must match exact transaction fields ───
   const mutations: string[] = [];
 
   if (stored.transactionId !== transaction.id) mutations.push('transactionId');
+  if (stored.sessionId !== transaction.sessionId) mutations.push('sessionId');
+  if (stored.intentId !== intentId) mutations.push('intentId');
   if (stored.merchantId !== transaction.merchantId) mutations.push('merchantId');
   if (stored.amount !== transaction.amount) mutations.push('amount');
   if (stored.currency !== transaction.currency) mutations.push('currency');
   if (stored.quantity !== transaction.quantity) mutations.push('quantity');
   if (stored.shippingAddressId !== transaction.shippingAddressId) mutations.push('shippingAddressId');
 
+  // Verify all product IDs match (order-independent)
+  const storedProductIds = [...stored.productIds].sort().join(',');
+  const txnProductIds = [...transaction.productIds].sort().join(',');
+  if (storedProductIds !== txnProductIds) mutations.push('productIds');
+
   if (mutations.length > 0) {
-    return {
-      valid: false,
-      reason: `Transaction mutated after authorization. Modified fields: ${mutations.join(', ')}`,
-    };
+    const reason = `Transaction mutated after authorization. Modified fields: ${mutations.join(', ')}`;
+    logTokenFailure(tokenId, transaction.sessionId, transaction.id, reason);
+    return { valid: false, reason };
   }
+
+  // ─── Token is valid ───
+  eventLogger.log({
+    sessionId: transaction.sessionId,
+    intentId,
+    transactionId: transaction.id,
+    type: 'auth_token',
+    severity: 'info',
+    message: `Authorization token verified: ${tokenId}`,
+    metadata: {
+      event: 'auth_token_verified',
+      tokenId,
+      transactionId: transaction.id,
+    },
+  });
 
   return { valid: true, token: stored };
 }
 
 // ─── Consume Token (single-use) ───
-export function consumeToken(tokenId: string): void {
+export function consumeToken(tokenId: string, sessionId: string, transactionId: string): void {
   const stored = authTokenStore.get(tokenId);
   if (stored) {
     stored.consumed = true;
     authTokenStore.set(tokenId, stored);
+
+    eventLogger.log({
+      sessionId,
+      transactionId,
+      type: 'auth_token',
+      severity: 'info',
+      message: `Authorization token consumed: ${tokenId} (single-use enforced)`,
+      metadata: {
+        event: 'auth_token_consumed',
+        tokenId,
+        transactionId,
+      },
+    });
   }
 }
 
@@ -178,4 +254,21 @@ export function getToken(tokenId: string): AuthorizationToken | undefined {
 // ─── Reset (for tests) ───
 export function resetAuthTokenStore(): void {
   authTokenStore.clear();
+}
+
+// ─── Internal: Log token verification failure ───
+function logTokenFailure(tokenId: string, sessionId: string, transactionId: string, reason: string): void {
+  eventLogger.log({
+    sessionId,
+    transactionId,
+    type: 'auth_token',
+    severity: 'critical',
+    message: `Authorization token FAILED: ${reason} (tokenId: ${tokenId})`,
+    metadata: {
+      event: 'auth_token_failed',
+      tokenId,
+      transactionId,
+      reason,
+    },
+  });
 }

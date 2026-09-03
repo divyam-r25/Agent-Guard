@@ -214,6 +214,7 @@ export interface SecurityEvent {
     | 'intent_mismatch'
     | 'decision'
     | 'payment'
+    | 'payment_rejected'
     | 'sanitization'
     | 'session'
     | 'intent_compiled'

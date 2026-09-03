@@ -1,9 +1,10 @@
 // ─── Payment Provider ───
 // Adapter pattern: RazorpayTestProvider + MockPaymentProvider
-// HARD RULE: No payment call without prior ALLOW from AgentGuard
-// Per PRD Section 14
+// HARD RULE: No payment call without valid server-side authorization token.
+// Per PRD Section 14 — Authorization Token is the MANDATORY payment boundary.
 
-import { CreateOrderInput, CreateOrderResult } from '../types';
+import { CreateOrderInput, CreateOrderResult, ProposedTransaction, IntentContract } from '../types';
+import { verifyAuthToken, consumeToken } from './auth-token';
 import { eventLogger } from './event-logger';
 
 // ─── Payment Provider Interface ───
@@ -115,6 +116,9 @@ class MockPaymentProvider implements PaymentProvider {
 }
 
 // ─── Payment Gateway (Singleton) ───
+// This is the SINGLE enforcement point for payment authorization.
+// Even if someone bypasses the normal UI/policy call chain and directly
+// reaches createOrder(), the token gate blocks unauthorized payment creation.
 class PaymentGateway {
   private provider: PaymentProvider;
   private isRazorpay: boolean;
@@ -136,19 +140,71 @@ class PaymentGateway {
   }
 
   /**
-   * Create an order. This method MUST only be called after AgentGuard ALLOW.
+   * Create a payment order.
+   *
+   * SECURITY INVARIANT: This method MUST NOT succeed unless the server
+   * verifies a valid, single-use, transaction-bound authorization token first.
+   *
+   * @param input         - Payment order input (amount, currency, receipt, notes)
+   * @param sessionId     - Current session ID
+   * @param authTokenId   - Authorization token ID to verify and consume
+   * @param transaction   - The proposed transaction (for binding verification)
+   * @param intent        - The intent contract (for intentId binding verification)
    */
-  async createOrder(input: CreateOrderInput, sessionId: string): Promise<CreateOrderResult> {
+  async createOrder(
+    input: CreateOrderInput,
+    sessionId: string,
+    authTokenId: string,
+    transaction: ProposedTransaction,
+    intent: IntentContract
+  ): Promise<CreateOrderResult> {
     const startTime = Date.now();
 
+    // ─── STEP 1: Verify authorization token ───
+    const verification = verifyAuthToken(authTokenId, transaction, intent.id);
+
+    if (!verification.valid) {
+      // AUTHORIZATION FAILED — do NOT call Razorpay or Mock provider
+      const failureResult: CreateOrderResult = {
+        success: false,
+        error: `Payment authorization failed: ${verification.reason}`,
+        provider: this.isRazorpay ? 'razorpay' : 'mock',
+      };
+
+      eventLogger.log({
+        sessionId,
+        intentId: intent.id,
+        transactionId: transaction.id,
+        type: 'payment_rejected',
+        severity: 'critical',
+        message: `Payment REJECTED — authorization token invalid: ${verification.reason}`,
+        metadata: {
+          tokenId: authTokenId,
+          transactionId: transaction.id,
+          amount: input.amount,
+          currency: input.currency,
+          reason: verification.reason,
+        },
+        latencyMs: Date.now() - startTime,
+      });
+
+      return failureResult;
+    }
+
+    // ─── STEP 2: Consume token (single-use — must happen before payment) ───
+    consumeToken(authTokenId, sessionId, transaction.id);
+
+    // ─── STEP 3: Create payment order via underlying provider ───
     const result = await this.provider.createOrder(input);
 
     eventLogger.log({
       sessionId,
+      intentId: intent.id,
+      transactionId: transaction.id,
       type: 'payment',
       severity: result.success ? 'info' : 'high',
       message: result.success
-        ? `Payment order created: ${result.orderId} (₹${result.amount} ${result.currency})`
+        ? `Payment order created: ${result.orderId} (₹${result.amount} ${result.currency}) [token: ${authTokenId}]`
         : `Payment order failed: ${result.error}`,
       metadata: {
         orderId: result.orderId,
@@ -157,6 +213,7 @@ class PaymentGateway {
         status: result.status,
         provider: result.provider,
         success: result.success,
+        authTokenId,
       },
       latencyMs: Date.now() - startTime,
     });

@@ -51,20 +51,32 @@ USER (natural language request)
 │     Heuristics + LLM classifier      │
 │     → PASS / SANITIZE / QUARANTINE   │
 │                                      │
-│  3. PAYMENT INTENT FIREWALL          │
+│  3. SOURCE-OF-TRUTH VERIFICATION     │
+│     Independent catalog lookup        │
+│     → verify price, merchant, product│
+│                                      │
+│  4. PAYMENT INTENT FIREWALL          │
 │     Proposed txn vs Intent Contract  │
 │     → risk score (0-100)             │
 │                                      │
-│  4. POLICY ENGINE                    │
+│  5. POLICY ENGINE                    │
 │     → ALLOW / STEP-UP / BLOCK        │
+│                                      │
+│  6. AUTHORIZATION TOKEN              │
+│     HMAC-SHA256 signed, single-use   │
+│     → bound to exact transaction     │
+│                                      │
+│  7. PAYMENT GATE                     │
+│     Token verified + consumed        │
+│     → then Razorpay / Mock provider  │
 └─────────────────┬────────────────────┘
                   │
     ┌─────────────┼─────────────┐
     ▼             ▼             ▼
   ALLOW        STEP-UP        BLOCK
-Razorpay     User must      Payment
-Test Order   approve        NOT created
-created      first
+Token issued  User must      No token
+Payment       approve →      No payment
+executed      then token
 ```
 
 ### Decision thresholds
@@ -153,6 +165,7 @@ cp .env.example .env
 | `LLM_MODEL` | Gemini model name | Optional (default: `gemini-2.0-flash`) |
 | `RAZORPAY_KEY_ID` | Razorpay **test** key ID | Optional (uses mock provider) |
 | `RAZORPAY_KEY_SECRET` | Razorpay **test** key secret | Optional (uses mock provider) |
+| `AUTH_TOKEN_SECRET` | HMAC secret for authorization tokens | Required in production |
 | `USE_MOCK_PAYMENTS` | Force mock payment provider | Optional (default: `true`) |
 | `USE_MOCK_LLM` | Force deterministic LLM | Optional (default: `false`) |
 
@@ -196,12 +209,17 @@ Starts both:
 
 | Guarantee | Implementation |
 |---|---|
-| No payment call before ALLOW | `policy-engine.ts` gates all payment creation |
+| No payment without authorization token | `payment-provider.ts` verifies HMAC token before every payment creation |
+| Authorization tokens are single-use | Token consumed immediately before payment; replay attacks rejected |
+| Tokens are transaction-bound | HMAC binds amount, merchant, product, quantity, address, session, intent |
+| Source-of-truth is mandatory | `source-of-truth.ts` independently verifies price/merchant/product before policy |
+| Source mismatch → deterministic BLOCK | Critical/high SoT discrepancies force BLOCK — LLM cannot override |
 | LLM cannot override hard rules | Pre-checks run before LLM; LLM is advisory |
-| STEP-UP requires explicit approval | `handleStepUpApproval` validates decision state |
+| STEP-UP requires explicit approval | `handleStepUpApproval` issues token only after user approval |
 | No Razorpay secrets in frontend | All payment calls are server-side only |
-| All BLOCK decisions are audited | `event-logger.ts` records every decision |
+| All BLOCK decisions are audited | `event-logger.ts` records every decision + token events |
 | Missing auth data fails closed | `authorizationCertainty = 'none'` → STEP-UP |
+| Production requires AUTH_TOKEN_SECRET | `auth-token.ts` fails startup if missing in production |
 | Injection detection is multi-layer | Heuristics → LLM classifier → Policy override |
 
 ---
@@ -244,6 +262,7 @@ AgentGuard is configured for multi-host deployment with separate frontend and ba
 - **Environment Variables**:
   - `PORT`: Provided automatically by Render (do not hardcode)
   - `FRONTEND_URL`: URL of the deployed Vercel frontend (e.g. `https://agentguard.vercel.app`), or a comma-separated list of allowed origins
+  - `AUTH_TOKEN_SECRET`: HMAC secret for signing authorization tokens (**required** — generate with `openssl rand -hex 32`)
   - `LLM_API_KEY`: Google Gemini API key (optional; falls back to deterministic rules if absent)
   - `LLM_PROVIDER`: LLM provider name (optional; default `gemini`)
   - `LLM_MODEL`: Gemini model name (optional; default `gemini-2.0-flash`)
